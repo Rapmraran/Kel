@@ -1,0 +1,6 @@
+# Mengabaikan folder cache Python
+__pycache__/
+*.pyc
+
+# Mengabaikan folder settingan VS Code
+.vscode/
