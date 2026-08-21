@@ -7,8 +7,10 @@ from services.trip_service import (
     get_travel_season, 
     recommended_transportation
 )
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from models.trip import Trip
+from database import SessionLocal, init_db
 
 
 class TripRequest(BaseModel):
@@ -20,10 +22,9 @@ class TripRequest(BaseModel):
 # FastAPI validates the JSON body against this model
 # If a field is missing or wrong type, it returns 422 automatically
 
-
-
 app = FastAPI()
 
+init_db()
 
 # a GET endpoint at the root path
 @app.get("/")
@@ -52,12 +53,12 @@ def get_recomendation_places():
 def get_transportations():
     list_transport = transportation
     return list_transport
-    
+
 
 
 # POST endpoint — receives JSON, returns JSON
-@app.post("/api/v1/trips")
-def create_trip(request: TripRequest):
+@app.post("/api/v1/trips2")
+def create_trip2(request: TripRequest):
     daily_budget = calculate_daily_budget(
         request.budget, request.days
     )
@@ -74,8 +75,106 @@ def create_trip(request: TripRequest):
         "category" : category,
         "recommendation_transport" : recommendation_transport
     }
+    
 
 
+# DB Get
+@app.get( "/api/v1/trips")
+def list_trips():
+    db = SessionLocal()
+    trips = db.query(Trip).all()
+    db.close()
+    return trips
+
+@app.get( "/api/v1/trips/{trip_id}")
+def get_trip(trip_id: int):
+    db = SessionLocal()
+    trip = db.query(Trip).filter(Trip.id == trip_id).first()
+    db.close()
+    # handling not found
+    if trip is None:
+        raise HTTPException(status_code=404, detail=f"Trip with id {trip_id} not found")
+    return trip
+
+
+# DB Post
+@app.post("/api/v1/trips")
+def create_trip(request: TripRequest):
+    # reuse Session 2 business logic
+    daily_budget = calculate_daily_budget(
+        request.budget, request.days
+    )
+    category = get_trip_category(
+        request.budget
+    )
+    # create a Trip ORM object
+    trip = Trip(
+        destination = request.destination,
+        days = request.days,
+        budget = request.budget,
+        category = category,
+        daily_budget = daily_budget,
+    )
+    # save to PostgreSQL
+    db = SessionLocal()
+    db.add(trip)
+    db.commit()
+    db.refresh(trip) # get the auto-generated id
+    db.close()
+    return trip
+
+
+# DB Put
+@app.put("/api/v1/trips/{trip_id}")
+def update_trip(trip_id: int, request: TripRequest):
+    db = SessionLocal() # Open database connection
+    
+    # Find the data first
+    trip = db.query(Trip).filter(Trip.id == trip_id).first()
+    
+    # If not found, return a 404 error
+    if trip is None:
+        db.close()
+        raise HTTPException(status_code=404, detail=f"Trip with id {trip_id} not found")
+        
+    # Recalculate daily budget and category
+    new_daily_budget = calculate_daily_budget(request.budget, request.days)
+    new_category = get_trip_category(request.budget)
+    
+    # Overwrite old database data with new data from the request
+    trip.destination = request.destination
+    trip.days = request.days
+    trip.budget = request.budget
+    trip.daily_budget = new_daily_budget
+    trip.category = new_category
+    
+    # Save permanent changes
+    db.commit()
+    db.refresh(trip) # Get the latest version
+    db.close()       # Close connection
+    
+    return trip
+
+
+# DB Delete
+@app.delete("/api/v1/trips/{trip_id}")
+def delete_trip(trip_id: int):
+    db = SessionLocal()
+    
+    # Find the data first
+    trip = db.query(Trip).filter(Trip.id == trip_id).first()
+    
+    # If data is not found, return a 404 error
+    if trip is None:
+        db.close()
+        raise HTTPException(status_code=404, detail=f"Trip with id {trip_id} not found")
+        
+    # If found, delete the data
+    db.delete(trip)
+    db.commit() # Save permanent changes
+    db.close()  # Close connection
+    
+    return {"message": f"Trip {trip_id} has been deleted successfully"}
 
 
 
